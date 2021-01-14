@@ -32,10 +32,6 @@ contract VowMock is Mock {
     }
 }
 
-interface DROPMemberList {
-    function updateMember(address, uint) external;
-}
-
 contract TinlakeMkrTest is MKRBasicSystemTest {
     // Decimals & precision
     uint256 constant MILLION  = 10 ** 6;
@@ -70,12 +66,13 @@ contract TinlakeMkrTest is MKRBasicSystemTest {
         vat.file(ilk, "dust", 0);
 
         //tinlake system tests work with 110%
-        spotter.file(ilk, "mat", 110 * RAY / 100);
+        uint mat =  110 * RAY / 100;
+        spotter.file(ilk, "mat", mat);
 
         // Update DROP spot value in Vat
         //spotter.poke(ilk);
-        // price with safety margin
-        uint spot =  110 * RAY / 100;
+        // assume a constant price with safety margin
+        uint spot = mat;
         vat.file(ilk, "spot", spot);
     }
 
@@ -97,12 +94,13 @@ contract TinlakeMkrTest is MKRBasicSystemTest {
         mgr = new TinlakeManager(address(vat), currency_, address(daiJoin), address(vow), address(seniorToken),
         address(seniorOperator), address(clerk), address(seniorTranche), ilk);
 
-        // accept mgr with Tinlake in MKR
+        // accept Tinlake MGR in Maker
         spellTinlake();
 
         // depend mgr in Tinlake clerk
         clerk.depend("mgr", address(mgr));
-        // depend mgr in Tinlake clerk
+
+        // depend Maker contracts in clerk
         clerk.depend("spotter", address(spotter));
         clerk.depend("vat", address(vat));
 
