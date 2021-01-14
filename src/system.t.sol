@@ -22,6 +22,8 @@ import "tinlake/test/mock/mock.sol";
 import "tinlake-maker-lib/mgr.sol";
 import "dss/vat.sol";
 import {DaiJoin} from "dss/join.sol";
+import {Spotter} from "dss/spot.sol";
+
 import "../lib/tinlake-maker-lib/src/mgr.sol";
 
 contract VowMock is Mock {
@@ -34,14 +36,15 @@ interface DROPMemberList {
     function updateMember(address, uint) external;
 }
 
-
 contract TinlakeMkrTest is LenderSystemTest {
     // Decimals & precision
     uint256 constant MILLION  = 10 ** 6;
+    uint256 constant RAY      = 10 ** 27;
     uint256 constant RAD      = 10 ** 45;
 
     TinlakeManager public mgr;
     Vat public vat;
+    Spotter public spotter;
     DaiJoin public daiJoin;
     VowMock vow;
     bytes32 ilk;
@@ -65,16 +68,31 @@ contract TinlakeMkrTest is LenderSystemTest {
         vat.file(ilk, "line", 5 * MILLION * RAD);
         // Set the NS2DRP-A dust
         vat.file(ilk, "dust", 0);
+
+        //tinlake system tests work with 110%
+        spotter.file(ilk, "mat", 110 * RAY / 100);
+
+        // Update DROP spot value in Vat
+        //spotter.poke(ilk);
+        // price with safety margin
+        uint spot =  110 * RAY / 100;
+        vat.file(ilk, "spot", spot);
     }
 
-    function setUpMgrAndMaker() public {
+    function mkrDeploy() public {
         vat = new Vat();
         daiJoin = new DaiJoin(address(vat), currency_);
         vow = new VowMock();
         ilk = "DROP";
-        daiJoin.rely(address(vat));
+        vat.rely(address(daiJoin));
+        spotter = new Spotter(address(vat));
+        vat.rely(address(spotter));
+    }
 
-        // deploy mgr
+    function setUpMgrAndMaker() public {
+        mkrDeploy();
+
+        // deploy mgr contract
         mgr = new TinlakeManager(address(vat), currency_, address(daiJoin), address(vow), address(seniorToken),
         address(seniorOperator), address(clerk), address(seniorTranche), ilk);
 
@@ -83,11 +101,14 @@ contract TinlakeMkrTest is LenderSystemTest {
 
         // depend mgr in Tinlake clerk
         clerk.depend("mgr", address(mgr));
+        // depend mgr in Tinlake clerk
+        clerk.depend("spotter", address(spotter));
+        clerk.depend("vat", address(vat));
+
         // give testcase the right to modify drop token holders
         root.relyContract(address(seniorMemberlist), address(this));
         // add mgr as drop token holder
         seniorMemberlist.updateMember(address(mgr), uint(-1));
-
     }
 
 }
