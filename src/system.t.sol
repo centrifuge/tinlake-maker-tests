@@ -79,6 +79,7 @@ contract TinlakeMkrTest is LenderSystemTest {
         vat.file(ilk, "spot", spot);
     }
 
+    // creates all relevant mkr contracts to test the mgr
     function mkrDeploy() public {
         vat = new Vat();
         daiJoin = new DaiJoin(address(vat), currency_);
@@ -92,7 +93,7 @@ contract TinlakeMkrTest is LenderSystemTest {
     function setUpMgrAndMaker() public {
         mkrDeploy();
 
-        // deploy mgr contract
+        // create mgr contract
         mgr = new TinlakeManager(address(vat), currency_, address(daiJoin), address(vow), address(seniorToken),
         address(seniorOperator), address(clerk), address(seniorTranche), ilk);
 
