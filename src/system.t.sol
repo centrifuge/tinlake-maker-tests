@@ -17,7 +17,7 @@ pragma solidity >=0.5.15 <0.6.0;
 pragma experimental ABIEncoderV2;
 
 import "ds-test/test.sol";
-import "tinlake/test/system/lender/mkr/mkr_scenarios.t.sol";
+import "tinlake/test/system/lender/mkr/mkr_basic.t.sol";
 import "tinlake/test/mock/mock.sol";
 import "tinlake-maker-lib/mgr.sol";
 import "dss/vat.sol";
@@ -36,7 +36,7 @@ interface DROPMemberList {
     function updateMember(address, uint) external;
 }
 
-contract TinlakeMkrTest is LenderSystemTest {
+contract TinlakeMkrTest is MKRBasicSystemTest {
     // Decimals & precision
     uint256 constant MILLION  = 10 ** 6;
     uint256 constant RAY      = 10 ** 27;
