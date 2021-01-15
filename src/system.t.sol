@@ -18,6 +18,7 @@ pragma experimental ABIEncoderV2;
 
 import "ds-test/test.sol";
 import "tinlake/test/system/lender/mkr/mkr_basic.t.sol";
+import "tinlake/test/system/lender/mkr/mkr_scenarios.t.sol";
 import "tinlake/test/mock/mock.sol";
 import "tinlake-maker-lib/mgr.sol";
 import "dss/vat.sol";
@@ -32,7 +33,8 @@ contract VowMock is Mock {
     }
 }
 
-contract TinlakeMkrTest is MKRBasicSystemTest {
+// executes all mkr tests from the Tinlake repo with the mgr and Maker contracts
+contract TinlakeMakerBasicTest is MKRBasicSystemTest, MKRLenderSystemTest {
     // Decimals & precision
     uint256 constant MILLION  = 10 ** 6;
     uint256 constant RAY      = 10 ** 27;
@@ -136,7 +138,7 @@ contract TinlakeMkrTest is MKRBasicSystemTest {
 
         // create mgr contract
         mgr = new TinlakeManager(address(vat), currency_, address(daiJoin), address(vow), address(seniorToken),
-        address(seniorOperator), address(clerk), address(seniorTranche), ilk);
+            address(seniorOperator), address(clerk), address(seniorTranche), ilk);
 
         // accept Tinlake MGR in Maker
         spellTinlake();
@@ -153,18 +155,4 @@ contract TinlakeMkrTest is MKRBasicSystemTest {
         // add mgr as drop token holder
         seniorMemberlist.updateMember(address(mgr), uint(-1));
     }
-
-    function testDebtIncrease() public {
-        setStabilityFee(uint(1000000115165872987700711356));   // 1 % day
-        uint juniorAmount = 200 ether;
-        uint mkrAmount = 500 ether;
-        uint borrowAmount = 300 ether;
-        _setUpDraw(mkrAmount, juniorAmount, borrowAmount);
-        lastRateUpdate = now;
-       warp(1 days);
-        dripMakerDebt();
-        uint expectedDebt = 101 ether;
-        assertEqTol(clerk.debt(), expectedDebt, "testMKRHarvest#1");
-    }
-
 }
