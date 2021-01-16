@@ -34,7 +34,7 @@ contract VowMock is Mock {
 }
 
 // executes all mkr tests from the Tinlake repo with the mgr and Maker contracts
-contract TinlakeMakerBasicTest is MKRBasicSystemTest, MKRLenderSystemTest {
+contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
     // Decimals & precision
     uint256 constant MILLION  = 10 ** 6;
     uint256 constant RAY      = 10 ** 27;
