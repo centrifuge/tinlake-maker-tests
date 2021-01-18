@@ -18,6 +18,7 @@ pragma experimental ABIEncoderV2;
 
 import "ds-test/test.sol";
 import "tinlake/test/system/lender/mkr/mkr_basic.t.sol";
+import "tinlake/test/system/lender/mkr/mkr_scenarios.t.sol";
 import "tinlake/test/mock/mock.sol";
 import "tinlake-maker-lib/mgr.sol";
 import "dss/vat.sol";
@@ -32,7 +33,8 @@ contract VowMock is Mock {
     }
 }
 
-contract TinlakeMkrTest is MKRBasicSystemTest {
+// executes all mkr tests from the Tinlake repo with the mgr and Maker contracts
+contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
     // Decimals & precision
     uint256 constant MILLION  = 10 ** 6;
     uint256 constant RAY      = 10 ** 27;
@@ -44,6 +46,11 @@ contract TinlakeMkrTest is MKRBasicSystemTest {
     DaiJoin public daiJoin;
     VowMock vow;
     bytes32 ilk;
+
+    uint lastRateUpdate;
+    uint stabilityFee;
+
+    bool warpCalled = false;
 
     function setUp() public {
         // setup Tinlake contracts with mocked maker adapter
@@ -74,6 +81,45 @@ contract TinlakeMkrTest is MKRBasicSystemTest {
         // assume a constant price with safety margin
         uint spot = mat;
         vat.file(ilk, "spot", spot);
+        lastRateUpdate = now;
+    }
+
+    // updates the interest rate in maker contracts
+    function dripMakerDebt() public {
+        (,uint prevRateIndex,,,) = vat.ilks(ilk);
+        uint newRateIndex = rmul(rpow(stabilityFee, now - lastRateUpdate, ONE), prevRateIndex);
+        lastRateUpdate = now;
+        (uint ink, uint art) = vat.urns(ilk, address(mgr));
+        vat.fold(ilk, address(vow), int(newRateIndex-prevRateIndex));
+    }
+
+    function setStabilityFee(uint fee) public {
+        stabilityFee = fee;
+    }
+
+    function makerEvent(bytes32 name, bool) public {
+        if(name == "live") {
+            // Global settlement not triggered
+            mgr.cage();
+        } else if(name == "glad") {
+            // Write-off not triggered
+            mgr.tell();
+            mgr.sink();
+        } else if(name  == "safe") {
+            // Soft liquidation not triggered
+            mgr.tell();
+        }
+    }
+
+    function warp(uint plusTime) public {
+        if (warpCalled == false)  {
+            warpCalled = true;
+            // init maker rate update mock
+            lastRateUpdate = now;
+        }
+        hevm.warp(now + plusTime);
+        // maker debt should be always up to date
+        dripMakerDebt();
     }
 
     // creates all relevant mkr contracts to test the mgr
@@ -92,7 +138,7 @@ contract TinlakeMkrTest is MKRBasicSystemTest {
 
         // create mgr contract
         mgr = new TinlakeManager(address(vat), currency_, address(daiJoin), address(vow), address(seniorToken),
-        address(seniorOperator), address(clerk), address(seniorTranche), ilk);
+            address(seniorOperator), address(clerk), address(seniorTranche), ilk);
 
         // accept Tinlake MGR in Maker
         spellTinlake();
@@ -109,5 +155,4 @@ contract TinlakeMkrTest is MKRBasicSystemTest {
         // add mgr as drop token holder
         seniorMemberlist.updateMember(address(mgr), uint(-1));
     }
-
 }
