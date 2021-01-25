@@ -90,7 +90,7 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         uint newRateIndex = rmul(rpow(stabilityFee, now - lastRateUpdate, ONE), prevRateIndex);
         lastRateUpdate = now;
         (uint ink, uint art) = vat.urns(ilk, address(mgr));
-        vat.fold(ilk, address(vow), int(newRateIndex-prevRateIndex));
+        vat.fold(ilk, address(daiJoin), int(newRateIndex-prevRateIndex));
     }
 
     function setStabilityFee(uint fee) public {
