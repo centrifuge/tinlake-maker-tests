@@ -156,55 +156,7 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         seniorMemberlist.updateMember(address(mgr), uint(- 1));
     }
 
-    function testSoftLiquidation() public {
-        uint fee = 1000000564701133626865910626;
-        // 5% per day
-        setStabilityFee(fee);
-        uint juniorAmount = 200 ether;
-        uint mkrAmount = 300 ether;
-        uint borrowAmount = 250 ether;
-        uint firstLoan = 1;
-        _setUpDraw(mkrAmount, juniorAmount, borrowAmount);
-        // second loan same ammount
-        uint secondLoan = setupOngoingDefaultLoan(borrowAmount);
-        warp(1 days);
-        // repay small amount of loan debt
-        uint repayAmount = 5 ether;
-        repayDefaultLoan(repayAmount);
-
-        warp(1 days);
-
-        assertTrue(mkrAssessor.calcSeniorTokenPrice() > ONE);
-
-        // trigger soft liquidation
-        mgr.tell();
-
-        warp(1 days);
-
-        // bring some currency into the reserve
-        repayAmount = 10 ether;
-        repayDefaultLoan(repayAmount);
-
-        coordinator.closeEpoch();
-
-        assertEq(reserve.totalBalance(), repayAmount);
-
-        coordinator.submitSolution(repayAmount, 0, 0, 0);
-
-        warp(1 hours);
-        coordinator.executeEpoch();
-
-        assertEqTol(currency.balanceOf(address(seniorTranche)), repayAmount, "testSoftLiquidation#1");
-
-        uint debt = clerk.debt();
-
-        mgr.unwind(coordinator.lastEpochExecuted());
-        // no currency in the reserve
-        assertEq(reserve.totalBalance(), 0);
-        assertEqTol(clerk.debt(), debt-repayAmount, "testSoftLiquidation#2");
-    }
-
-    function testSoftLiquidationDebtHigherThanColl() public {
+    function _setupUnderwaterTinlake() public {
         uint fee = 1000000564701133626865910626;
         // 5% per day
         setStabilityFee(fee);
@@ -227,26 +179,78 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         pile.changeRate(firstLoan, nftFeed.WRITE_OFF_PHASE_A());
 
         assertTrue(mkrAssessor.calcSeniorTokenPrice() > 0);
+
+        // junior lost everything
         assertEq(mkrAssessor.calcJuniorTokenPrice(), 0);
+    }
 
-        // vault under water
-        assertTrue(clerk.debt() > clerk.cdpink());
+    function _executeEpoch(uint dropRedeem) public {
+        warp(1 days);
+
+        // close epoch
+        coordinator.closeEpoch();
+        coordinator.submitSolution(dropRedeem, 0, 0, 0);
+
+        warp(1 hours);
+        coordinator.executeEpoch();
+    }
+
+    function testSoftLiquidation() public {
+        uint fee = 1000000564701133626865910626;
+        // 5% per day
+        setStabilityFee(fee);
+        uint juniorAmount = 200 ether;
+        uint mkrAmount = 300 ether;
+        uint borrowAmount = 250 ether;
+        uint firstLoan = 1;
+        _setUpDraw(mkrAmount, juniorAmount, borrowAmount);
+        // second loan same ammount
+        uint secondLoan = setupOngoingDefaultLoan(borrowAmount);
+        warp(1 days);
+        // repay small amount of loan debt
+        uint repayAmount = 5 ether;
+        repayDefaultLoan(repayAmount);
+
+        warp(1 days);
+
+        // system is in a healthy state
+        assertTrue(mkrAssessor.calcSeniorTokenPrice() > ONE);
+
         // trigger soft liquidation
-
         mgr.tell();
 
         warp(1 days);
+
         // bring some currency into the reserve
         repayAmount = 10 ether;
         repayDefaultLoan(repayAmount);
 
-        coordinator.closeEpoch();
-        assertEq(reserve.totalBalance(), repayAmount);
-        coordinator.submitSolution(repayAmount, 0, 0, 0);
+        _executeEpoch(repayAmount);
 
-        warp(1 hours);
+        assertEqTol(currency.balanceOf(address(seniorTranche)), repayAmount, "testSoftLiquidation#1");
 
-        coordinator.executeEpoch();
+        uint debt = clerk.debt();
+
+        mgr.unwind(coordinator.lastEpochExecuted());
+        // no currency in the reserve
+        assertEq(reserve.totalBalance(), 0);
+        assertEqTol(clerk.debt(), debt-repayAmount, "testSoftLiquidation#2");
+    }
+
+    function testSoftLiquidationUnderwater() public {
+        _setupUnderwaterTinlake();
+
+        // vault under water
+        assertTrue(clerk.debt() > clerk.cdpink());
+
+        // trigger soft liquidation
+        mgr.tell();
+
+        // bring some currency into the reserve
+        uint repayAmount = 10 ether;
+        repayDefaultLoan(repayAmount);
+
+        _executeEpoch(repayAmount);
 
         uint debt = clerk.debt();
 
@@ -256,6 +260,56 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         mgr.unwind(coordinator.lastEpochExecuted());
         assertEqTol(reserve.totalBalance(), 0, "unwind#2");
         assertEqTol(clerk.debt(), debt-repayAmount, "unwind#3");
+    }
 
+    function testWriteOff() public {
+        testSoftLiquidationUnderwater();
+        uint preDebt = clerk.debt();
+
+        assertTrue(preDebt > 0);
+
+        // write off
+        mgr.sink();
+
+        uint debt = clerk.debt();
+        assertEq(debt, 0);
+
+        // bring some currency into the reserve
+        uint repayAmount = 13 ether;
+        repayDefaultLoan(repayAmount);
+
+        _executeEpoch(repayAmount);
+
+        mgr.recover(coordinator.lastEpochExecuted());
+    }
+
+    function testGlobalSettlement() public {
+        // 5% per day
+        uint fee = 1000000564701133626865910626;
+        setStabilityFee(fee);
+        uint juniorAmount = 200 ether;
+        uint mkrAmount = 300 ether;
+        uint borrowAmount = 250 ether;
+        _setUpDraw(mkrAmount, juniorAmount, borrowAmount);
+
+        assertEq(clerk.debt(), borrowAmount-juniorAmount);
+
+        // trigger global settlement
+        mgr.cage();
+
+        mgr.tell();
+
+        warp(1 days);
+
+        // bring some currency into the reserve
+        uint repayAmount = 10 ether;
+        repayDefaultLoan(repayAmount);
+
+        _executeEpoch(repayAmount);
+
+        clerk.changeOwnerMgr(address(this));
+        mgr.take(coordinator.lastEpochExecuted());
+
+        assertEqTol(currency.balanceOf(address(this)), repayAmount, "globalSettlement#1");
     }
 }
