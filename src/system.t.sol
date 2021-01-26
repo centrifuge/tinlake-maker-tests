@@ -194,12 +194,14 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         warp(1 hours);
         coordinator.executeEpoch();
 
-        assertEqTol(currency.balanceOf(address(seniorTranche)), repayAmount, "unwind#1");
+        assertEqTol(currency.balanceOf(address(seniorTranche)), repayAmount, "testSoftLiquidation#1");
+
+        uint debt = clerk.debt();
 
         mgr.unwind(coordinator.lastEpochExecuted());
         // no currency in the reserve
         assertEq(reserve.totalBalance(), 0);
-        // todo check correct state in mkr contracts
+        assertEqTol(clerk.debt(), debt-repayAmount, "testSoftLiquidation#2");
     }
 
     function testSoftLiquidationDebtHigherThanColl() public {
@@ -246,11 +248,14 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
 
         coordinator.executeEpoch();
 
+        uint debt = clerk.debt();
+
         assertEqTol(currency.balanceOf(address(seniorTranche)), repayAmount, "unwind#1");
         assertTrue(coordinator.submissionPeriod() == false);
         // trigger soft liquidation
         mgr.unwind(coordinator.lastEpochExecuted());
-        assertEq(reserve.totalBalance(), 0);
-        // todo check correct state in mkr contracts
+        assertEqTol(reserve.totalBalance(), 0, "unwind#2");
+        assertEqTol(clerk.debt(), debt-repayAmount, "unwind#3");
+
     }
 }
