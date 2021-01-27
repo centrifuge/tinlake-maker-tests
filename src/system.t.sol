@@ -256,8 +256,9 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
 
         assertEqTol(currency.balanceOf(address(seniorTranche)), repayAmount, "unwind#1");
         assertTrue(coordinator.submissionPeriod() == false);
-        // trigger soft liquidation
+
         mgr.unwind(coordinator.lastEpochExecuted());
+
         assertEqTol(reserve.totalBalance(), 0, "unwind#2");
         assertEqTol(clerk.debt(), debt-repayAmount, "unwind#3");
     }
@@ -270,6 +271,8 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
 
         // write off
         mgr.sink();
+        uint tab = mgr.tab();
+        assertEq(preDebt, tab/ONE);
 
         uint debt = clerk.debt();
         assertEq(debt, 0);
@@ -281,6 +284,8 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         _executeEpoch(repayAmount);
 
         mgr.recover(coordinator.lastEpochExecuted());
+        assertEq(reserve.totalBalance(), 0);
+        assertEq(mgr.tab(), tab-repayAmount);
     }
 
     function testGlobalSettlement() public {
@@ -308,8 +313,12 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         _executeEpoch(repayAmount);
 
         clerk.changeOwnerMgr(address(this));
-        mgr.take(coordinator.lastEpochExecuted());
 
-        assertEqTol(currency.balanceOf(address(this)), repayAmount, "globalSettlement#1");
+        //tab = dai written off
+        uint tab = mgr.tab();
+        mgr.recover(coordinator.lastEpochExecuted());
+
+        assertEq(reserve.totalBalance(), 0);
+        assertEqTol(tab/ONE-repayAmount, mgr.tab()/ONE, "testGlobalSettlement#1");
     }
 }
