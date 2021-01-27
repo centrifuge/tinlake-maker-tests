@@ -36,9 +36,9 @@ contract VowMock is Mock {
 // executes all mkr tests from the Tinlake repo with the mgr and Maker contracts
 contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
     // Decimals & precision
-    uint256 constant MILLION  = 10 ** 6;
-    uint256 constant RAY      = 10 ** 27;
-    uint256 constant RAD      = 10 ** 45;
+    uint256 constant MILLION = 10 ** 6;
+    uint256 constant RAY = 10 ** 27;
+    uint256 constant RAD = 10 ** 45;
 
     TinlakeManager public mgr;
     Vat public vat;
@@ -73,7 +73,7 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         vat.file(ilk, "dust", 0);
 
         //tinlake system tests work with 110%
-        uint mat =  110 * RAY / 100;
+        uint mat = 110 * RAY / 100;
         spotter.file(ilk, "mat", mat);
 
         // Update DROP spot value in Vat
@@ -90,7 +90,7 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         uint newRateIndex = rmul(rpow(stabilityFee, now - lastRateUpdate, ONE), prevRateIndex);
         lastRateUpdate = now;
         (uint ink, uint art) = vat.urns(ilk, address(mgr));
-        vat.fold(ilk, address(vow), int(newRateIndex-prevRateIndex));
+        vat.fold(ilk, address(daiJoin), int(newRateIndex - prevRateIndex));
     }
 
     function setStabilityFee(uint fee) public {
@@ -98,21 +98,21 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
     }
 
     function makerEvent(bytes32 name, bool) public {
-        if(name == "live") {
+        if (name == "live") {
             // Global settlement not triggered
             mgr.cage();
-        } else if(name == "glad") {
+        } else if (name == "glad") {
             // Write-off not triggered
             mgr.tell();
             mgr.sink();
-        } else if(name  == "safe") {
+        } else if (name == "safe") {
             // Soft liquidation not triggered
             mgr.tell();
         }
     }
 
     function warp(uint plusTime) public {
-        if (warpCalled == false)  {
+        if (warpCalled == false) {
             warpCalled = true;
             // init maker rate update mock
             lastRateUpdate = now;
@@ -153,6 +153,163 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         // give testcase the right to modify drop token holders
         root.relyContract(address(seniorMemberlist), address(this));
         // add mgr as drop token holder
-        seniorMemberlist.updateMember(address(mgr), uint(-1));
+        seniorMemberlist.updateMember(address(mgr), uint(- 1));
+    }
+
+    function _setupUnderwaterTinlake() public {
+        uint fee = 1000000564701133626865910626;
+        // 5% per day
+        setStabilityFee(fee);
+        uint juniorAmount = 200 ether;
+        uint mkrAmount = 300 ether;
+        uint borrowAmount = 250 ether;
+        uint firstLoan = 1;
+        _setUpDraw(mkrAmount, juniorAmount, borrowAmount);
+        // second loan same ammount
+        uint secondLoan = setupOngoingDefaultLoan(borrowAmount);
+        warp(1 days);
+        // repay small amount of loan debt
+        uint repayAmount = 5 ether;
+        repayDefaultLoan(repayAmount);
+
+        // nav will be zero because loan is overdue
+        warp(5 days);
+        // write 40% of debt off / second loan 100% loss
+        root.relyContract(address(pile), address(this));
+        pile.changeRate(firstLoan, nftFeed.WRITE_OFF_PHASE_A());
+
+        assertTrue(mkrAssessor.calcSeniorTokenPrice() > 0);
+
+        // junior lost everything
+        assertEq(mkrAssessor.calcJuniorTokenPrice(), 0);
+    }
+
+    function _executeEpoch(uint dropRedeem) public {
+        warp(1 days);
+
+        // close epoch
+        coordinator.closeEpoch();
+        coordinator.submitSolution(dropRedeem, 0, 0, 0);
+
+        warp(1 hours);
+        coordinator.executeEpoch();
+    }
+
+    function testSoftLiquidation() public {
+        uint fee = 1000000564701133626865910626;
+        // 5% per day
+        setStabilityFee(fee);
+        uint juniorAmount = 200 ether;
+        uint mkrAmount = 300 ether;
+        uint borrowAmount = 250 ether;
+        uint firstLoan = 1;
+        _setUpDraw(mkrAmount, juniorAmount, borrowAmount);
+        // second loan same ammount
+        uint secondLoan = setupOngoingDefaultLoan(borrowAmount);
+        warp(1 days);
+        // repay small amount of loan debt
+        uint repayAmount = 5 ether;
+        repayDefaultLoan(repayAmount);
+
+        warp(1 days);
+
+        // system is in a healthy state
+        assertTrue(mkrAssessor.calcSeniorTokenPrice() > ONE);
+
+        // trigger soft liquidation
+        mgr.tell();
+
+        warp(1 days);
+
+        // bring some currency into the reserve
+        repayAmount = 10 ether;
+        repayDefaultLoan(repayAmount);
+
+        _executeEpoch(repayAmount);
+
+        assertEqTol(currency.balanceOf(address(seniorTranche)), repayAmount, "testSoftLiquidation#1");
+
+        uint debt = clerk.debt();
+
+        mgr.unwind(coordinator.lastEpochExecuted());
+        // no currency in the reserve
+        assertEq(reserve.totalBalance(), 0);
+        assertEqTol(clerk.debt(), debt-repayAmount, "testSoftLiquidation#2");
+    }
+
+    function testSoftLiquidationUnderwater() public {
+        _setupUnderwaterTinlake();
+
+        // vault under water
+        assertTrue(clerk.debt() > clerk.cdpink());
+
+        // trigger soft liquidation
+        mgr.tell();
+
+        // bring some currency into the reserve
+        uint repayAmount = 10 ether;
+        repayDefaultLoan(repayAmount);
+
+        _executeEpoch(repayAmount);
+
+        uint debt = clerk.debt();
+
+        assertEqTol(currency.balanceOf(address(seniorTranche)), repayAmount, "unwind#1");
+        assertTrue(coordinator.submissionPeriod() == false);
+        // trigger soft liquidation
+        mgr.unwind(coordinator.lastEpochExecuted());
+        assertEqTol(reserve.totalBalance(), 0, "unwind#2");
+        assertEqTol(clerk.debt(), debt-repayAmount, "unwind#3");
+    }
+
+    function testWriteOff() public {
+        testSoftLiquidationUnderwater();
+        uint preDebt = clerk.debt();
+
+        assertTrue(preDebt > 0);
+
+        // write off
+        mgr.sink();
+
+        uint debt = clerk.debt();
+        assertEq(debt, 0);
+
+        // bring some currency into the reserve
+        uint repayAmount = 13 ether;
+        repayDefaultLoan(repayAmount);
+
+        _executeEpoch(repayAmount);
+
+        mgr.recover(coordinator.lastEpochExecuted());
+    }
+
+    function testGlobalSettlement() public {
+        // 5% per day
+        uint fee = 1000000564701133626865910626;
+        setStabilityFee(fee);
+        uint juniorAmount = 200 ether;
+        uint mkrAmount = 300 ether;
+        uint borrowAmount = 250 ether;
+        _setUpDraw(mkrAmount, juniorAmount, borrowAmount);
+
+        assertEq(clerk.debt(), borrowAmount-juniorAmount);
+
+        // trigger global settlement
+        mgr.cage();
+
+        mgr.tell();
+
+        warp(1 days);
+
+        // bring some currency into the reserve
+        uint repayAmount = 10 ether;
+        repayDefaultLoan(repayAmount);
+
+        _executeEpoch(repayAmount);
+
+        clerk.changeOwnerMgr(address(this));
+        mgr.take(coordinator.lastEpochExecuted());
+
+        assertEqTol(currency.balanceOf(address(this)), repayAmount, "globalSettlement#1");
     }
 }
