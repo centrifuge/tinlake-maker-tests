@@ -284,8 +284,8 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         _executeEpoch(repayAmount);
 
         mgr.recover(coordinator.lastEpochExecuted());
-        assertEq(reserve.totalBalance(), 0);
-        assertEq(mgr.tab(), tab-repayAmount);
+        assertEqTol(reserve.totalBalance(), 0, "testWriteOff#1");
+        assertEqTol(mgr.tab()/ONE, tab/ONE-repayAmount, "testWriteOff#2");
     }
 
     function testGlobalSettlement() public {
