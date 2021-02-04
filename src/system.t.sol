@@ -437,10 +437,10 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         // mkr is healthy
         assertTrue(isMKRStateHealthy() == true);
 
+        // trigger soft liquidation with healthy pool
         mgr.tell();
 
         mgr.sink();
-
 
         uint max = 5;
         uint minRepayAmount = 50 ether;
@@ -476,5 +476,42 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
 
         }
         assertEq(currTab(), 0);
+    }
+
+    function testRecoverAfterTabZero() public {
+        uint fee = ONE;
+        setStabilityFee(fee);
+        uint juniorAmount = 200 ether;
+        uint mkrAmount = 300 ether;
+        uint borrowAmount = 500 ether;
+        _setUpDraw(mkrAmount, juniorAmount, borrowAmount);
+
+        assertEq(clerk.debt(), borrowAmount-juniorAmount);
+
+        // mkr is healthy
+        assertTrue(isMKRStateHealthy() == true);
+
+        mgr.tell();
+
+        mgr.sink();
+
+        // repay 100% of tab
+        uint repayAmount = currTab();
+        repayDefaultLoan(repayAmount);
+        executeEpoch(repayAmount);
+
+        mgr.recover(coordinator.lastEpochExecuted());
+        assertEqTol(currTab(), 0, "testRecoverAfterTabZero#1");
+
+        (,,uint tokenLeft) = seniorTranche.users(address(mgr));
+        assertTrue(tokenLeft > 0);
+
+        repayAmount = 10 ether;
+        repayDefaultLoan(repayAmount);
+        executeEpoch(repayAmount);
+
+        // all currency should go to clerk
+        mgr.recover(coordinator.lastEpochExecuted());
+        assertEqTol(currency.balanceOf(address(clerk)), repayAmount, "testRecoverAfterTabZero#2");
     }
 }
