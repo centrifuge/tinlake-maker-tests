@@ -385,7 +385,7 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
 
     }
 
-    function testMultipleUnwindRepayAllMKRDebt() public {
+    function testUnwindRepayAllMKRDebt() public {
         // no stability fee
         uint fee = ONE;
         setStabilityFee(fee);
@@ -418,5 +418,63 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         assertEqTol(preOperatorBalance+amountForMKR-preDebt, currency.balanceOf(address(clerk)), "testMultipleUnwindMRKDebt#2");
     }
 
+    // returns the amount of debt in MKR after write-off
+    function currTab() public returns(uint) {
+        return mgr.tab()/ONE;
+    }
 
+    function testMultipleRecover() public {
+        // 5% per day
+        uint fee = 1000000564701133626865910626;
+        setStabilityFee(fee);
+        uint juniorAmount = 200 ether;
+        uint mkrAmount = 300 ether;
+        uint borrowAmount = 500 ether;
+        _setUpDraw(mkrAmount, juniorAmount, borrowAmount);
+
+        assertEq(clerk.debt(), borrowAmount-juniorAmount);
+
+        // mkr is healthy
+        assertTrue(isMKRStateHealthy() == true);
+
+        mgr.tell();
+
+        mgr.sink();
+
+
+        uint max = 5;
+        uint minRepayAmount = 50 ether;
+        uint loan = 1;
+        uint loanDebt = pile.debt(loan);
+        for (uint i = 0; i < max; i++) {
+            uint preTab = currTab();
+            uint seniorTokenPrice = mkrAssessor.calcSeniorTokenPrice2();
+
+            uint loanDebt = pile.debt(loan);
+            if (loanDebt == 0) {
+                break;
+            }
+
+            // different loan repayment amounts
+            uint repayAmount =  minRepayAmount + (i * 10 ether);
+            repayDefaultLoan(repayAmount);
+            executeEpoch(repayAmount);
+
+            (uint redeemFulfillment,,) = SeniorTrancheLike(address(seniorTranche)).epochs(coordinator.lastEpochExecuted());
+            (uint seniorRedeemOrder,,,) = coordinator.order();
+            uint amountForMKR = rmul(seniorRedeemOrder, redeemFulfillment);
+
+            mgr.recover(coordinator.lastEpochExecuted());
+
+            if (currTab() > 0) {
+                // total repay amount is used tab reduction
+                assertEqTol(preTab-amountForMKR, currTab(), "testMultipleRecover#2");
+            } else {
+                assertEqTol(currency.balanceOf(address(clerk)), amountForMKR-preTab, "testMultipleRecover#3");
+                break;
+            }
+
+        }
+        assertEq(currTab(), 0);
+    }
 }
