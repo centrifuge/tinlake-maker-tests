@@ -24,6 +24,7 @@ import "tinlake-maker-lib/mgr.sol";
 import "dss/vat.sol";
 import {DaiJoin} from "dss/join.sol";
 import {Spotter} from "dss/spot.sol";
+import {End} from "dss/end.sol";
 
 import "../lib/tinlake-maker-lib/src/mgr.sol";
 
@@ -31,6 +32,10 @@ contract VowMock is Mock {
     function fess(uint256 tab) public {
         values_uint["fess_tab"] = tab;
     }
+}
+
+interface SeniorTrancheLike {
+    function epochs(uint epochID) external returns(uint, uint, uint);
 }
 
 // executes all mkr tests from the Tinlake repo with the mgr and Maker contracts
@@ -43,6 +48,7 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
     TinlakeManager public mgr;
     Vat public vat;
     Spotter public spotter;
+    End public end;
     DaiJoin public daiJoin;
     VowMock vow;
     bytes32 ilk;
@@ -100,7 +106,7 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
     function makerEvent(bytes32 name, bool) public {
         if (name == "live") {
             // Global settlement not triggered
-            mgr.cage();
+            mgr.migrate(address(0));
         } else if (name == "glad") {
             // Write-off not triggered
             mgr.tell();
@@ -131,6 +137,8 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         vat.rely(address(daiJoin));
         spotter = new Spotter(address(vat));
         vat.rely(address(spotter));
+
+        end = new End();
     }
 
     function setUpMgrAndMaker() public {
@@ -138,7 +146,7 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
 
         // create mgr contract
         mgr = new TinlakeManager(address(vat), currency_, address(daiJoin), address(vow), address(seniorToken),
-            address(seniorOperator), address(clerk), address(seniorTranche), ilk);
+            address(seniorOperator), address(clerk), address(seniorTranche), address(end), ilk);
 
         // accept Tinlake MGR in Maker
         spellTinlake();
@@ -191,10 +199,13 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
 
         // close epoch
         coordinator.closeEpoch();
-        coordinator.submitSolution(dropRedeem, 0, 0, 0);
 
-        warp(1 hours);
-        coordinator.executeEpoch();
+        // submitting a solution is required
+        if(coordinator.submissionPeriod() == true) {
+            coordinator.submitSolution(dropRedeem, 0, 0, 0);
+            warp(1 hours);
+            coordinator.executeEpoch();
+        }
     }
 
     function isMKRStateHealthy() public returns(bool) {
@@ -274,6 +285,7 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
     }
 
     function testWriteOff() public {
+        // triggers tell and unwind
         testSoftLiquidationUnderwater();
         assertTrue(isMKRStateHealthy() == false);
 
@@ -315,10 +327,12 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         // mkr is healthy
         assertTrue(isMKRStateHealthy() == true);
 
+        mgr.tell();
+
+        mgr.sink();
+
         // trigger global settlement
         mgr.cage();
-
-        mgr.tell();
 
         warp(1 days);
 
@@ -337,4 +351,76 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         assertEq(reserve.totalBalance(), 0);
         assertEqTol(tab/ONE-repayAmount, mgr.tab()/ONE, "testGlobalSettlement#1");
     }
+
+    function testMultipleUnwind() public {
+        uint loan = 1;
+        testSoftLiquidationUnderwater();
+        assertTrue(isMKRStateHealthy() == false);
+
+        uint preDebt = clerk.debt();
+
+        // mkr debt is still existing
+        assertTrue(preDebt > 0);
+
+        uint max = 10;
+        uint minRepayAmount = 10 ether;
+        uint loanDebt = pile.debt(loan);
+        for (uint i = 0; i < max; i++) {
+            uint loanDebt = pile.debt(loan);
+            if (loanDebt == 0) {
+                break;
+            }
+
+            // different loan repayment amounts
+            uint repayAmount = ((i+1) * minRepayAmount);
+            repayDefaultLoan(repayAmount);
+            executeEpoch(repayAmount);
+
+            uint preDebt = clerk.debt();
+            mgr.unwind(coordinator.lastEpochExecuted());
+
+            (uint redeemFulfillment,,) = SeniorTrancheLike(address(seniorTranche)).epochs(coordinator.lastEpochExecuted());
+            (uint seniorRedeemOrder,,,) = coordinator.order();
+            uint amountForMKR = rmul(seniorRedeemOrder, redeemFulfillment);
+
+            //total loan repayment amount is used for redeemOrder from mgr
+            assertEqTol(preDebt-amountForMKR, clerk.debt(), "testMultipleUnwind#1");
+        }
+
+    }
+
+    function testMultipleUnwindRepayAllMKRDebt() public {
+        // no stability fee
+        uint fee = ONE;
+        setStabilityFee(fee);
+        uint juniorAmount = 200 ether;
+        uint mkrAmount = 300 ether;
+        uint borrowAmount = 250 ether;
+        uint firstLoan = 1;
+
+        // default loan has 5% interest per day
+        _setUpDraw(mkrAmount, juniorAmount, borrowAmount);
+
+        mgr.tell();
+
+        uint repayAmount = borrowAmount;
+        repayDefaultLoan(repayAmount);
+        executeEpoch(repayAmount);
+
+        uint preDebt = clerk.debt();
+
+
+        uint preOperatorBalance = currency.balanceOf(address(clerk));
+
+        (uint redeemFulfillment,,) = SeniorTrancheLike(address(seniorTranche)).epochs(coordinator.lastEpochExecuted());
+        (uint seniorRedeemOrder,,,) = coordinator.order();
+        uint amountForMKR = rmul(seniorRedeemOrder, redeemFulfillment);
+
+        mgr.unwind(coordinator.lastEpochExecuted());
+        assertEqTol(clerk.debt(), 0, "testMultipleUnwindMRKDebt#1");
+        // difference between collateralValue and debt should receive the clerk
+        assertEqTol(preOperatorBalance+amountForMKR-preDebt, currency.balanceOf(address(clerk)), "testMultipleUnwindMRKDebt#2");
+    }
+
+
 }
