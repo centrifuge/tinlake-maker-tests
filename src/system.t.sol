@@ -24,6 +24,7 @@ import "tinlake-maker-lib/mgr.sol";
 import "dss/vat.sol";
 import {DaiJoin} from "dss/join.sol";
 import {Spotter} from "dss/spot.sol";
+import {End} from "dss/end.sol";
 
 import "../lib/tinlake-maker-lib/src/mgr.sol";
 
@@ -47,6 +48,7 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
     TinlakeManager public mgr;
     Vat public vat;
     Spotter public spotter;
+    End public end;
     DaiJoin public daiJoin;
     VowMock vow;
     bytes32 ilk;
@@ -135,6 +137,8 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         vat.rely(address(daiJoin));
         spotter = new Spotter(address(vat));
         vat.rely(address(spotter));
+
+        end = new End();
     }
 
     function setUpMgrAndMaker() public {
@@ -142,7 +146,7 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
 
         // create mgr contract
         mgr = new TinlakeManager(address(vat), currency_, address(daiJoin), address(vow), address(seniorToken),
-            address(seniorOperator), address(clerk), address(seniorTranche), ilk);
+            address(seniorOperator), address(clerk), address(seniorTranche), address(end), ilk);
 
         // accept Tinlake MGR in Maker
         spellTinlake();
