@@ -452,7 +452,6 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         uint loanDebt = pile.debt(loan);
         for (uint i = 0; i < max; i++) {
             uint preTab = currTab();
-            uint seniorTokenPrice = mkrAssessor.calcSeniorTokenPrice2();
 
             uint loanDebt = pile.debt(loan);
             if (loanDebt == 0) {
