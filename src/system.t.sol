@@ -111,7 +111,6 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
     bytes32 constant ilk = "DROP"; // New Collateral Type
 
     // -- testing --
-    Hevm constant hevm = Hevm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
     uint256 rate;
     uint256 ceiling = 400 ether;
     string doc = "Please sign on the dotted line.";
@@ -124,7 +123,6 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
     }
 
     function setUpMgrAndMakerMIP21() public {
-        hevm.warp(604411200);
         self = address(this);
 
         end = new EndMock();
@@ -201,7 +199,27 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         urn.hope(mgr_);
         mgr.file("urn", address(urn));
         mgr.file("liq", address(oracle));
+
+
+
+        // depend mgr in Tinlake clerk
+        clerk.depend("mgr", address(mgr));
+
+        // depend Maker contracts in clerk
+        clerk.depend("spotter", address(spotter));
+        clerk.depend("vat", address(vat));
+
+        // give testcase the right to modify drop token holders
+        root.relyContract(address(seniorMemberlist), address(this));
+        // add mgr as drop token holder
+        seniorMemberlist.updateMember(address(mgr), uint(- 1));
+
+        mgr.rely(address(clerk));
+
+        // lock RWA token
+        mgr.lock(1 ether);
     }
+
 //
 //    function spellTinlake() public {
 //        vat.init(ilk);
@@ -230,15 +248,16 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
 
     // updates the interest rate in maker contracts
     function dripMakerDebt() public {
-        (,uint prevRateIndex,,,) = vat.ilks(ilk);
-        uint newRateIndex = rmul(rpow(stabilityFee, now - lastRateUpdate, ONE), prevRateIndex);
-        lastRateUpdate = now;
-        (uint ink, uint art) = vat.urns(ilk, address(mgr));
-        vat.fold(ilk, address(daiJoin), int(newRateIndex - prevRateIndex));
+//        (,uint prevRateIndex,,,) = vat.ilks(ilk);
+//        uint newRateIndex = rmul(rpow(stabilityFee, now - lastRateUpdate, ONE), prevRateIndex);
+//        lastRateUpdate = now;
+//        (uint ink, uint art) = vat.urns(ilk, address(mgr));
+//        vat.fold(ilk, address(daiJoin), int(newRateIndex - prevRateIndex));
     }
 
     function setStabilityFee(uint fee) public {
-        stabilityFee = fee;
+       // stabilityFee = fee;
+        jug.file(ilk, "duty", fee);
     }
 
     function makerEvent(bytes32 name, bool) public {
