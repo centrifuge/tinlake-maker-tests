@@ -32,7 +32,7 @@ import { RwaLiquidationOracle } from "rwa-example/RwaLiquidationOracle.sol";
 import { DaiJoin } from 'dss/join.sol';
 import { AuthGemJoin } from "dss-gem-joins/join-auth.sol";
 import "dss/vat.sol";
-import {DaiJoin} from "dss/join.sol";
+import {DaiJoin, GemJoin} from "dss/join.sol";
 import {Spotter} from "dss/spot.sol";
 
 import "../lib/tinlake-maker-lib/src/mgr.sol";
@@ -108,14 +108,18 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
     address vow = address(123);
     address end_;
     address urn_;
-    bytes32 constant ilk = "DROP"; // New Collateral Type
+    bytes32 public constant ilk = "DROP";
 
     // -- testing --
     uint256 rate;
     uint256 ceiling = 400 ether;
     string doc = "Please sign on the dotted line.";
 
-    function setUp() public {
+    // dummy weth collateral
+    GemJoin ethJoin;
+    SimpleToken weth;
+
+function setUp() public {
         // setup Tinlake contracts with mocked maker adapter
         super.setUp();
         // replace mocked maker adapter with maker and adapter
@@ -218,45 +222,60 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
 
         // lock RWA token
         mgr.lock(1 ether);
+
+        jug.drip(ilk);
+
+        deployWETHCollateral();
+
+        createDAIWithWETH();
+
     }
 
-//
-//    function spellTinlake() public {
-//        vat.init(ilk);
-//
-//        vat.rely(address(mgr));
-//        daiJoin.rely(address(mgr));
-//
-//        // Set the global debt ceiling
-//        vat.file("Line", 1_468_750_000 * RAD);
-//        // Set the NS2DRP-A debt ceiling
-//        vat.file(ilk, "line", 5 * MILLION * RAD);
-//        // Set the NS2DRP-A dust
-//        vat.file(ilk, "dust", 0);
-//
-//        //tinlake system tests work with 110%
-//        uint mat = 110 * RAY / 100;
-//        spotter.file(ilk, "mat", mat);
-//
-//        // Update DROP spot value in Vat
-//        //spotter.poke(ilk);
-//        // assume a constant price with safety margin
-//        uint spot = mat;
-//        vat.file(ilk, "spot", spot);
-//        lastRateUpdate = now;
-//    }
+    function deployWETHCollateral() public {
+        bytes32 wethIlk = "ETH";
+        weth  = new SimpleToken("WETH", "WETH");
+
+        ethJoin = new GemJoin(address(vat), wethIlk, address(weth));
+        jug.init(wethIlk);
+        vat.init(wethIlk);
+
+        // Internal auth
+        vat.rely(address(ethJoin));
+
+        // Set a debt  ceiling
+        vat.file(wethIlk, "line", 5 * MILLION * RAD);
+        // Set the NS2DRP-A dust
+        vat.file(wethIlk, "dust", 0);
+
+        //tinlake system tests work with 110%
+        uint mat = 110 * RAY / 100;
+        spotter.file(wethIlk, "mat", mat);
+
+        //spotter.poke(ilk);
+        // assume a constant price with safety margin
+        // add some price
+        uint spot = mat;
+        // set some price
+        vat.file(wethIlk, "spot", 1000 * RAY);
+    }
+
+    function createDAIWithWETH() public {
+        weth.approve(address(ethJoin), uint(-1));
+        weth.mint(address(this), 10 ether);
+
+        ethJoin.join(address(this), 10 ether);
+        vat.frob("ETH", address(this), address(this), address(this), 5 ether, 600 ether);
+        vat.hope(address(daiJoin));
+        daiJoin.exit(address(this), 600 ether);
+    }
 
     // updates the interest rate in maker contracts
     function dripMakerDebt() public {
-//        (,uint prevRateIndex,,,) = vat.ilks(ilk);
-//        uint newRateIndex = rmul(rpow(stabilityFee, now - lastRateUpdate, ONE), prevRateIndex);
-//        lastRateUpdate = now;
-//        (uint ink, uint art) = vat.urns(ilk, address(mgr));
-//        vat.fold(ilk, address(daiJoin), int(newRateIndex - prevRateIndex));
+        jug.drip(ilk);
     }
 
     function setStabilityFee(uint fee) public {
-       // stabilityFee = fee;
+        stabilityFee = fee;
         jug.file(ilk, "duty", fee);
     }
 
