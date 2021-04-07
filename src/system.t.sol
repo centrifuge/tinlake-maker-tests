@@ -187,11 +187,11 @@ function setUp() public {
             address(seniorToken), // DROP token
             address(seniorOperator), // senior operator
             address(seniorTranche), // senior tranche
-            address(seniorTranche),
             end_,
             address(vat), address(vow));
 
         mgr_ = address(mgr);
+        mgr.file("owner",   address(seniorTranche));
 
         urn = new RwaUrn(address(vat), address(jug), address(gemJoin), address(daiJoin), mgr_);
         urn_ = address(urn);
