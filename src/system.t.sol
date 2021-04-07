@@ -38,8 +38,6 @@ import {Spotter} from "dss/spot.sol";
 import "../lib/tinlake-maker-lib/src/mgr.sol";
 import "ds-token/token.sol";
 
-//import {TellSpell, BumpSpell} from "tinlake-maker-lib/test/spell.t.sol";
-
 contract VowMock is Mock {
     function fess(uint256 tab) public {
         values_uint["fess_tab"] = tab;
@@ -152,6 +150,7 @@ function setUp() public {
         vat.rely(address(spotter));
 
         daiJoin = new DaiJoin(address(vat), address(currency));
+        daiJoin_ = address(daiJoin);
         vat.rely(address(daiJoin));
         currency.rely(address(daiJoin));
 
@@ -288,10 +287,13 @@ function setUp() public {
             mgr.cage();
         } else if (name == "glad") {
             // Write-off not triggered
+            mip21Tell();
             mgr.tell();
+            mip21Cull();
             mgr.cull();
         } else if (name == "safe") {
             // Soft liquidation not triggered
+            mip21Tell();
             mgr.tell();
         }
     }
@@ -346,21 +348,19 @@ function setUp() public {
         coordinator.executeEpoch();
     }
 
-//    function mip21Tell() public {
-//        // lets trigger a soft liquidation
-//        BumpSpell bumpSpell = new BumpSpell();
-//        vote(address(bumpSpell));
-//        bumpSpell.schedule();
-//        warp(now + 2 weeks);
-//        bumpSpell.cast();
-//
-//        // first on the MIP21 oracle
-//        TellSpell tellSpell = new TellSpell();
-//        vote(address(tellSpell));
-//        tellSpell.schedule();
-//        warp(now + 2 weeks);
-//        tellSpell.cast();
-//    }
+    function mip21Tell() public {
+        // trigger a soft liquidation in the mip21 oracle
+        oracle.bump(ilk, 500 ether);
+        // reduce the debt ceiling to zero
+        vat.file(ilk, "line", 0);
+        // trigger soft liquidation
+        oracle.tell(ilk);
+    }
+
+    function mip21Cull() public {
+        warp(2 weeks);
+        oracle.cull(ilk, address(urn));
+    }
 
     function testSoftLiquidation() public {
         uint fee = 1000000564701133626865910626;
@@ -384,7 +384,7 @@ function setUp() public {
         assertTrue(mkrAssessor.calcSeniorTokenPrice() > ONE);
 
         // trigger soft liquidation
-      //  mip21Tell();
+        mip21Tell();
         mgr.tell();
 
         warp(1 days);
@@ -412,6 +412,7 @@ function setUp() public {
         assertTrue(clerk.debt() > clerk.cdpink());
 
         // trigger soft liquidation
+        mip21Tell();
         mgr.tell();
 
         // bring some currency into the reserve
@@ -431,12 +432,14 @@ function setUp() public {
     }
 
     function testWriteOff() public {
+        // previous test case triggers soft liquidation
         testSoftLiquidationUnderwater();
         uint preDebt = clerk.debt();
 
         assertTrue(preDebt > 0);
 
         // write off
+        mip21Cull();
         mgr.cull();
 
         uint debt = clerk.debt();
@@ -448,7 +451,10 @@ function setUp() public {
 
         _executeEpoch(repayAmount);
 
+        uint preTotalDai = vat.dai(daiJoin_);
         mgr.recover(coordinator.lastEpochExecuted());
+        uint totalDai = vat.dai(daiJoin_);
+        assertEqTol((totalDai/ONE), (preTotalDai/ONE) -repayAmount, "testWriteOff#1");
     }
 
     function testGlobalSettlement() public {
@@ -465,6 +471,7 @@ function setUp() public {
         // trigger global settlement
         mgr.cage();
 
+        mip21Tell();
         mgr.tell();
 
         warp(1 days);
