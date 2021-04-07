@@ -565,15 +565,14 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         // default loan has 5% interest per day
         _setUpDraw(mkrAmount, juniorAmount, borrowAmount);
 
-        mgr.tell();
+        tell();
 
         uint repayAmount = borrowAmount;
         repayDefaultLoan(repayAmount);
         executeEpoch(repayAmount);
 
         uint preDebt = clerk.debt();
-
-
+        
         uint preOperatorBalance = currency.balanceOf(address(clerk));
 
         (uint redeemFulfillment,,) = SeniorTrancheLike(address(seniorTranche)).epochs(coordinator.lastEpochExecuted());
@@ -672,8 +671,10 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         repayDefaultLoan(repayAmount);
         executeEpoch(repayAmount);
 
+        (,,uint seniorPrice) = SeniorTrancheLike(address(seniorTranche)).epochs(coordinator.lastEpochExecuted());
+
         // all currency should go to clerk
         mgr.recover(coordinator.lastEpochExecuted());
-        assertEqTol(currency.balanceOf(address(clerk)), repayAmount, "testRecoverAfterTabZero#2");
+        assertEqTol(currency.balanceOf(address(clerk)), rmul(tokenLeft, seniorPrice), "testRecoverAfterTabZero#2");
     }
 }
