@@ -572,7 +572,7 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
         executeEpoch(repayAmount);
 
         uint preDebt = clerk.debt();
-        
+
         uint preOperatorBalance = currency.balanceOf(address(clerk));
 
         (uint redeemFulfillment,,) = SeniorTrancheLike(address(seniorTranche)).epochs(coordinator.lastEpochExecuted());
