@@ -38,6 +38,8 @@ import {Spotter} from "dss/spot.sol";
 import "../lib/tinlake-maker-lib/src/mgr.sol";
 import "ds-token/token.sol";
 
+//import {TellSpell, BumpSpell} from "tinlake-maker-lib/test/spell.t.sol";
+
 contract VowMock is Mock {
     function fess(uint256 tab) public {
         values_uint["fess_tab"] = tab;
@@ -204,8 +206,6 @@ function setUp() public {
         mgr.file("urn", address(urn));
         mgr.file("liq", address(oracle));
 
-
-
         // depend mgr in Tinlake clerk
         clerk.depend("mgr", address(mgr));
 
@@ -227,7 +227,10 @@ function setUp() public {
 
         deployWETHCollateral();
 
-        createDAIWithWETH();
+        // create circulating DAI supply
+        uint drawDAIAmount  = 600 ether;
+        uint wethAmount = 10 ether;
+        createDAIWithWETH(drawDAIAmount, wethAmount);
 
     }
 
@@ -259,14 +262,14 @@ function setUp() public {
         vat.file(wethIlk, "spot", 1000 * RAY);
     }
 
-    function createDAIWithWETH() public {
+    function createDAIWithWETH(uint drawDAIAmount, uint wethAmount) public {
         weth.approve(address(ethJoin), uint(-1));
         weth.mint(address(this), 10 ether);
 
         ethJoin.join(address(this), 10 ether);
-        vat.frob("ETH", address(this), address(this), address(this), 5 ether, 600 ether);
+        vat.frob("ETH", address(this), address(this), address(this), int(wethAmount/2), int(drawDAIAmount));
         vat.hope(address(daiJoin));
-        daiJoin.exit(address(this), 600 ether);
+        daiJoin.exit(address(this), drawDAIAmount);
     }
 
     // updates the interest rate in maker contracts
@@ -303,40 +306,6 @@ function setUp() public {
         // maker debt should be always up to date
         dripMakerDebt();
     }
-
-//    // creates all relevant mkr contracts to test the mgr
-//    function mkrDeploy() public {
-//        vat = new Vat();
-//        daiJoin = new DaiJoin(address(vat), currency_);
-//        vow = new VowMock();
-//        ilk = "DROP";
-//        vat.rely(address(daiJoin));
-//        spotter = new Spotter(address(vat));
-//        vat.rely(address(spotter));
-//    }
-//
-//    function setUpMgrAndMaker() public {
-//        mkrDeploy();
-//
-//        // create mgr contract
-//        mgr = new TinlakeManager(address(vat), currency_, address(daiJoin), address(vow), address(seniorToken),
-//            address(seniorOperator), address(clerk), address(seniorTranche), ilk);
-//
-//        // accept Tinlake MGR in Maker
-//        spellTinlake();
-//
-//        // depend mgr in Tinlake clerk
-//        clerk.depend("mgr", address(mgr));
-//
-//        // depend Maker contracts in clerk
-//        clerk.depend("spotter", address(spotter));
-//        clerk.depend("vat", address(vat));
-//
-//        // give testcase the right to modify drop token holders
-//        root.relyContract(address(seniorMemberlist), address(this));
-//        // add mgr as drop token holder
-//        seniorMemberlist.updateMember(address(mgr), uint(- 1));
-//    }
 
     function _setupUnderwaterTinlake() public {
         uint fee = 1000000564701133626865910626;
@@ -377,6 +346,22 @@ function setUp() public {
         coordinator.executeEpoch();
     }
 
+//    function mip21Tell() public {
+//        // lets trigger a soft liquidation
+//        BumpSpell bumpSpell = new BumpSpell();
+//        vote(address(bumpSpell));
+//        bumpSpell.schedule();
+//        warp(now + 2 weeks);
+//        bumpSpell.cast();
+//
+//        // first on the MIP21 oracle
+//        TellSpell tellSpell = new TellSpell();
+//        vote(address(tellSpell));
+//        tellSpell.schedule();
+//        warp(now + 2 weeks);
+//        tellSpell.cast();
+//    }
+
     function testSoftLiquidation() public {
         uint fee = 1000000564701133626865910626;
         // 5% per day
@@ -399,6 +384,7 @@ function setUp() public {
         assertTrue(mkrAssessor.calcSeniorTokenPrice() > ONE);
 
         // trigger soft liquidation
+      //  mip21Tell();
         mgr.tell();
 
         warp(1 days);
