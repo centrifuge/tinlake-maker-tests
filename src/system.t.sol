@@ -21,16 +21,16 @@ import "tinlake/test/system/lender/mkr/mkr_basic.t.sol";
 import "tinlake/test/system/lender/mkr/mkr_scenarios.t.sol";
 import "tinlake/test/mock/mock.sol";
 import "tinlake-maker-lib/mgr.sol";
-import { Dai } from "dss/dai.sol";
-import { Vat } from "dss/vat.sol";
-import { Jug } from 'dss/jug.sol';
-import { Spotter } from "dss/spot.sol";
+import {Dai} from "dss/dai.sol";
+import {Vat} from "dss/vat.sol";
+import {Jug} from 'dss/jug.sol';
+import {Spotter} from "dss/spot.sol";
 
-import { RwaToken } from "rwa-example/RwaToken.sol";
-import { RwaUrn } from "rwa-example/RwaUrn.sol";
-import { RwaLiquidationOracle } from "rwa-example/RwaLiquidationOracle.sol";
-import { DaiJoin } from 'dss/join.sol';
-import { AuthGemJoin } from "dss-gem-joins/join-auth.sol";
+import {RwaToken} from "rwa-example/RwaToken.sol";
+import {RwaUrn} from "rwa-example/RwaUrn.sol";
+import {RwaLiquidationOracle} from "rwa-example/RwaLiquidationOracle.sol";
+import {DaiJoin} from 'dss/join.sol';
+import {AuthGemJoin} from "dss-gem-joins/join-auth.sol";
 import "dss/vat.sol";
 import {DaiJoin, GemJoin} from "dss/join.sol";
 import {Spotter} from "dss/spot.sol";
@@ -45,7 +45,7 @@ contract VowMock is Mock {
 }
 
 contract EndMock is Mock, Auth {
-    mapping (bytes32 => int) public values_int;
+    mapping(bytes32 => int) public values_int;
 
     constructor() public {
         wards[msg.sender] = 1;
@@ -60,6 +60,10 @@ contract EndMock is Mock, Auth {
         values_uint["debt"] = debt;
     }
 
+}
+
+interface SeniorTrancheLike {
+    function epochs(uint epochID) external returns(uint, uint, uint);
 }
 
 // executes all mkr tests from the Tinlake repo with the mgr and Maker contracts
@@ -119,7 +123,9 @@ contract TinlakeMakerTests is MKRBasicSystemTest, MKRLenderSystemTest {
     GemJoin ethJoin;
     SimpleToken weth;
 
-function setUp() public {
+    uint liqTime = 1 hours;
+
+    function setUp() public {
         // setup Tinlake contracts with mocked maker adapter
         super.setUp();
         // replace mocked maker adapter with maker and adapter
@@ -167,8 +173,7 @@ function setUp() public {
         oracle.init(
             ilk,
             wmul(ceiling, 1.1 ether),
-            doc,
-            2 weeks);
+            doc, uint48(liqTime));
         vat.rely(address(oracle));
         (,address pip,,) = oracle.ilks(ilk);
 
@@ -181,7 +186,7 @@ function setUp() public {
         vat.rely(gemJoin_);
 
 
-        mgr = new TinlakeManager(address(currency)  ,
+        mgr = new TinlakeManager(address(currency),
             daiJoin_,
             address(seniorToken), // DROP token
             address(seniorOperator), // senior operator
@@ -190,7 +195,7 @@ function setUp() public {
             address(vat), address(vow));
 
         mgr_ = address(mgr);
-        mgr.file("owner",   address(seniorTranche));
+        mgr.file("owner", address(clerk));
 
         urn = new RwaUrn(address(vat), address(jug), address(gemJoin), address(daiJoin), mgr_);
         urn_ = address(urn);
@@ -227,7 +232,7 @@ function setUp() public {
         deployWETHCollateral();
 
         // create circulating DAI supply
-        uint drawDAIAmount  = 600 ether;
+        uint drawDAIAmount = 600 ether;
         uint wethAmount = 10 ether;
         createDAIWithWETH(drawDAIAmount, wethAmount);
 
@@ -235,7 +240,7 @@ function setUp() public {
 
     function deployWETHCollateral() public {
         bytes32 wethIlk = "ETH";
-        weth  = new SimpleToken("WETH", "WETH");
+        weth = new SimpleToken("WETH", "WETH");
 
         ethJoin = new GemJoin(address(vat), wethIlk, address(weth));
         jug.init(wethIlk);
@@ -262,11 +267,11 @@ function setUp() public {
     }
 
     function createDAIWithWETH(uint drawDAIAmount, uint wethAmount) public {
-        weth.approve(address(ethJoin), uint(-1));
+        weth.approve(address(ethJoin), uint(- 1));
         weth.mint(address(this), 10 ether);
 
         ethJoin.join(address(this), 10 ether);
-        vat.frob("ETH", address(this), address(this), address(this), int(wethAmount/2), int(drawDAIAmount));
+        vat.frob("ETH", address(this), address(this), address(this), int(wethAmount / 2), int(drawDAIAmount));
         vat.hope(address(daiJoin));
         daiJoin.exit(address(this), drawDAIAmount);
     }
@@ -281,21 +286,36 @@ function setUp() public {
         jug.file(ilk, "duty", fee);
     }
 
+    // triggers a soft liquidation
+    function tell() public {
+        mip21Tell();
+        mgr.tell();
+    }
+
+    function cull() public {
+        mip21Cull();
+        mgr.cull();
+    }
+
+    function isMKRStateHealthy() public returns(bool) {
+        nftFeed.calcUpdateNAV();
+        uint lockedCollateralDAI = rmul(clerk.cdpink(), mkrAssessor.calcSeniorTokenPrice());
+        uint requiredLocked = clerk.calcOvercollAmount(clerk.cdptab());
+        return lockedCollateralDAI >= requiredLocked;
+    }
+
+    // returns the amount of debt in MKR after write-off
+    function currTab() public returns(uint) {
+        return mgr.tab()/ONE;
+    }
+
     function makerEvent(bytes32 name, bool) public {
-        if (name == "live") {
-            // Global settlement not triggered
-            mgr.cage();
-        } else if (name == "glad") {
-            // Write-off not triggered
-            mip21Tell();
-            mgr.tell();
-            mip21Cull();
-            mgr.cull();
-        } else if (name == "safe") {
-            // Soft liquidation not triggered
-            mip21Tell();
-            mgr.tell();
-        }
+        if(!(name == "safe" || name == "glad"|| name == "live")) return;
+        tell();
+        if (name == "safe") return;
+        cull();
+        if (name == "glad") return;
+        mgr.cage();
     }
 
     function warp(uint plusTime) public {
@@ -337,15 +357,18 @@ function setUp() public {
         assertEq(mkrAssessor.calcJuniorTokenPrice(), 0);
     }
 
-    function _executeEpoch(uint dropRedeem) public {
+    function executeEpoch(uint dropRedeem) public {
         warp(1 days);
 
         // close epoch
         coordinator.closeEpoch();
-        coordinator.submitSolution(dropRedeem, 0, 0, 0);
 
-        warp(1 hours);
-        coordinator.executeEpoch();
+        // submitting a solution is required
+        if(coordinator.submissionPeriod() == true) {
+            coordinator.submitSolution(dropRedeem, 0, 0, 0);
+            warp(1 hours);
+            coordinator.executeEpoch();
+        }
     }
 
     function mip21Tell() public {
@@ -358,7 +381,7 @@ function setUp() public {
     }
 
     function mip21Cull() public {
-        warp(2 weeks);
+        warp(liqTime);
         oracle.cull(ilk, address(urn));
     }
 
@@ -384,8 +407,7 @@ function setUp() public {
         assertTrue(mkrAssessor.calcSeniorTokenPrice() > ONE);
 
         // trigger soft liquidation
-        mip21Tell();
-        mgr.tell();
+        tell();
 
         warp(1 days);
 
@@ -393,7 +415,7 @@ function setUp() public {
         repayAmount = 10 ether;
         repayDefaultLoan(repayAmount);
 
-        _executeEpoch(repayAmount);
+        executeEpoch(repayAmount);
 
         assertEqTol(currency.balanceOf(address(seniorTranche)), repayAmount, "testSoftLiquidation#1");
 
@@ -402,7 +424,7 @@ function setUp() public {
         mgr.unwind(coordinator.lastEpochExecuted());
         // no currency in the reserve
         assertEq(reserve.totalBalance(), 0);
-        assertEqTol(clerk.debt(), debt-repayAmount, "testSoftLiquidation#2");
+        assertEqTol(clerk.debt(), debt - repayAmount, "testSoftLiquidation#2");
     }
 
     function testSoftLiquidationUnderwater() public {
@@ -412,14 +434,13 @@ function setUp() public {
         assertTrue(clerk.debt() > clerk.cdpink());
 
         // trigger soft liquidation
-        mip21Tell();
-        mgr.tell();
+        tell();
 
         // bring some currency into the reserve
         uint repayAmount = 10 ether;
         repayDefaultLoan(repayAmount);
 
-        _executeEpoch(repayAmount);
+        executeEpoch(repayAmount);
 
         uint debt = clerk.debt();
 
@@ -428,7 +449,7 @@ function setUp() public {
         // trigger soft liquidation
         mgr.unwind(coordinator.lastEpochExecuted());
         assertEqTol(reserve.totalBalance(), 0, "unwind#2");
-        assertEqTol(clerk.debt(), debt-repayAmount, "unwind#3");
+        assertEqTol(clerk.debt(), debt - repayAmount, "unwind#3");
     }
 
     function testWriteOff() public {
@@ -439,8 +460,7 @@ function setUp() public {
         assertTrue(preDebt > 0);
 
         // write off
-        mip21Cull();
-        mgr.cull();
+        cull();
 
         uint debt = clerk.debt();
         assertEq(debt, 0);
@@ -449,12 +469,12 @@ function setUp() public {
         uint repayAmount = 13 ether;
         repayDefaultLoan(repayAmount);
 
-        _executeEpoch(repayAmount);
+        executeEpoch(repayAmount);
 
         uint preTotalDai = vat.dai(daiJoin_);
         mgr.recover(coordinator.lastEpochExecuted());
         uint totalDai = vat.dai(daiJoin_);
-        assertEqTol((totalDai/ONE), (preTotalDai/ONE) -repayAmount, "testWriteOff#1");
+        assertEqTol((totalDai / ONE), (preTotalDai / ONE) - repayAmount, "testWriteOff#1");
     }
 
     function testGlobalSettlement() public {
@@ -468,11 +488,15 @@ function setUp() public {
 
         assertEq(clerk.debt(), borrowAmount-juniorAmount);
 
+        // mkr is healthy
+        assertTrue(isMKRStateHealthy() == true);
+
+        tell();
+
+        cull();
+
         // trigger global settlement
         mgr.cage();
-
-        mip21Tell();
-        mgr.tell();
 
         warp(1 days);
 
@@ -480,11 +504,176 @@ function setUp() public {
         uint repayAmount = 10 ether;
         repayDefaultLoan(repayAmount);
 
-        _executeEpoch(repayAmount);
+        executeEpoch(repayAmount);
 
         clerk.changeOwnerMgr(address(this));
-//        mgr.take(coordinator.lastEpochExecuted());
-//
-//        assertEqTol(currency.balanceOf(address(this)), repayAmount, "globalSettlement#1");
+
+        //tab = dai written off
+        uint tab = mgr.tab();
+        mgr.recover(coordinator.lastEpochExecuted());
+
+        assertEqTol(reserve.totalBalance(), 0, "testGlobalSettlement#1");
+        assertEqTol(tab/ONE-repayAmount, mgr.tab()/ONE, "testGlobalSettlement#2");
+    }
+
+    function testMultipleUnwind() public {
+        uint loan = 1;
+        testSoftLiquidationUnderwater();
+        assertTrue(isMKRStateHealthy() == false);
+
+        uint preDebt = clerk.debt();
+
+        // mkr debt is still existing
+        assertTrue(preDebt > 0);
+
+        uint max = 10;
+        uint minRepayAmount = 10 ether;
+        uint loanDebt = pile.debt(loan);
+        for (uint i = 0; i < max; i++) {
+            uint loanDebt = pile.debt(loan);
+            if (loanDebt == 0) {
+                break;
+            }
+
+            // different loan repayment amounts
+            uint repayAmount = ((i+1) * minRepayAmount);
+            repayDefaultLoan(repayAmount);
+            executeEpoch(repayAmount);
+
+            uint preDebt = clerk.debt();
+            mgr.unwind(coordinator.lastEpochExecuted());
+
+            (uint redeemFulfillment,,) = SeniorTrancheLike(address(seniorTranche)).epochs(coordinator.lastEpochExecuted());
+            (uint seniorRedeemOrder,,,) = coordinator.order();
+            uint amountForMKR = rmul(seniorRedeemOrder, redeemFulfillment);
+
+            //total loan repayment amount is used for redeemOrder from mgr
+            assertEqTol(preDebt-amountForMKR, clerk.debt(), "testMultipleUnwind#1");
+        }
+
+    }
+
+    function testMultipleUnwindRepayAllMKRDebt() public {
+        // no stability fee
+        uint fee = ONE;
+        setStabilityFee(fee);
+        uint juniorAmount = 200 ether;
+        uint mkrAmount = 300 ether;
+        uint borrowAmount = 250 ether;
+        uint firstLoan = 1;
+
+        // default loan has 5% interest per day
+        _setUpDraw(mkrAmount, juniorAmount, borrowAmount);
+
+        mgr.tell();
+
+        uint repayAmount = borrowAmount;
+        repayDefaultLoan(repayAmount);
+        executeEpoch(repayAmount);
+
+        uint preDebt = clerk.debt();
+
+
+        uint preOperatorBalance = currency.balanceOf(address(clerk));
+
+        (uint redeemFulfillment,,) = SeniorTrancheLike(address(seniorTranche)).epochs(coordinator.lastEpochExecuted());
+        (uint seniorRedeemOrder,,,) = coordinator.order();
+        uint amountForMKR = rmul(seniorRedeemOrder, redeemFulfillment);
+
+        mgr.unwind(coordinator.lastEpochExecuted());
+        assertEqTol(clerk.debt(), 0, "testMultipleUnwindMRKDebt#1");
+        // difference between collateralValue and debt should receive the clerk
+        assertEqTol(preOperatorBalance+amountForMKR-preDebt, currency.balanceOf(address(clerk)), "testMultipleUnwindMRKDebt#2");
+    }
+
+    function testMultipleRecover() public {
+        // 5% per day
+        uint fee = 1000000564701133626865910626;
+        setStabilityFee(fee);
+        uint juniorAmount = 200 ether;
+        uint mkrAmount = 300 ether;
+        uint borrowAmount = 500 ether;
+        _setUpDraw(mkrAmount, juniorAmount, borrowAmount);
+
+        assertEq(clerk.debt(), borrowAmount-juniorAmount);
+
+        // mkr is healthy
+        assertTrue(isMKRStateHealthy() == true);
+
+        // trigger soft liquidation with healthy pool
+        tell();
+
+        cull();
+
+        uint max = 5;
+        uint minRepayAmount = 50 ether;
+        uint loan = 1;
+        uint loanDebt = pile.debt(loan);
+        for (uint i = 0; i < max; i++) {
+            uint preTab = currTab();
+
+            uint loanDebt = pile.debt(loan);
+            if (loanDebt == 0) {
+                break;
+            }
+
+            // different loan repayment amounts
+            uint repayAmount =  minRepayAmount + (i * 10 ether);
+            repayDefaultLoan(repayAmount);
+            executeEpoch(repayAmount);
+
+            (uint redeemFulfillment,,) = SeniorTrancheLike(address(seniorTranche)).epochs(coordinator.lastEpochExecuted());
+            (uint seniorRedeemOrder,,,) = coordinator.order();
+            uint amountForMKR = rmul(seniorRedeemOrder, redeemFulfillment);
+
+            mgr.recover(coordinator.lastEpochExecuted());
+
+            if (currTab() > 0) {
+                // total repay amount is used tab reduction
+                assertEqTol(preTab-amountForMKR, currTab(), "testMultipleRecover#2");
+            } else {
+                assertEqTol(currency.balanceOf(address(clerk)), amountForMKR-preTab, "testMultipleRecover#3");
+                break;
+            }
+
+        }
+        assertEq(currTab(), 0);
+    }
+
+    function testRecoverAfterTabZero() public {
+        uint fee = ONE;
+        setStabilityFee(fee);
+        uint juniorAmount = 200 ether;
+        uint mkrAmount = 300 ether;
+        uint borrowAmount = 500 ether;
+        _setUpDraw(mkrAmount, juniorAmount, borrowAmount);
+
+        assertEq(clerk.debt(), borrowAmount-juniorAmount);
+
+        // mkr is healthy
+        assertTrue(isMKRStateHealthy() == true);
+
+        tell();
+
+        cull();
+
+        // repay 100% of tab
+        uint repayAmount = currTab();
+        repayDefaultLoan(repayAmount);
+        executeEpoch(repayAmount);
+
+        mgr.recover(coordinator.lastEpochExecuted());
+        assertEqTol(currTab(), 0, "testRecoverAfterTabZero#1");
+
+        (,,uint tokenLeft) = seniorTranche.users(address(mgr));
+        assertTrue(tokenLeft > 0);
+
+        repayAmount = 10 ether;
+        repayDefaultLoan(repayAmount);
+        executeEpoch(repayAmount);
+
+        // all currency should go to clerk
+        mgr.recover(coordinator.lastEpochExecuted());
+        assertEqTol(currency.balanceOf(address(clerk)), repayAmount, "testRecoverAfterTabZero#2");
     }
 }
