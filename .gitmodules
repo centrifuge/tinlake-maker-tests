@@ -4,9 +4,6 @@
 [submodule "lib/tinlake"]
 	path = lib/tinlake
 	url = https://github.com/centrifuge/tinlake
-[submodule "lib/lib/tinlake-maker-lib"]
-	path = lib/lib/tinlake-maker-lib
-	url = https://github.com/centrifuge/tinlake-maker-lib
 [submodule "lib/tinlake-maker-lib"]
 	path = lib/tinlake-maker-lib
 	url = https://github.com/centrifuge/tinlake-maker-lib
